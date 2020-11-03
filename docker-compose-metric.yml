@@ -159,10 +159,11 @@ services:
 
   monasca-persister:
     hostname: docker-host
-    image: fest/persister:${MON_PERSISTER_VERSION}
+    image: monasca/persister:${MON_PERSISTER_VERSION}
     restart: unless-stopped
     environment:
       LOGSTASH_FIELDS: "service=monasca-persister"
+      KAFKA_LEGACY_CLIENT_ENABLED: "false"
     depends_on:
       - monasca
       - influxdb
