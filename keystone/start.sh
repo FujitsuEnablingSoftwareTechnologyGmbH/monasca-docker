@@ -59,3 +59,8 @@ else
 fi
 
 supervisord --nodaemon -c /etc/supervisor/supervisord.conf
+
+while :
+do
+	sleep 1
+done

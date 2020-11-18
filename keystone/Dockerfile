@@ -1,14 +1,16 @@
 from ubuntu:18.04
 ENV DEBIAN_FRONTEND=noninteractive
 
+run mkdir -p  /etc/keystone/fernet-keys
 run apt-get update && \
     apt-get install -y software-properties-common && \
     add-apt-repository cloud-archive:train && \
     apt-get update && \
     apt-get install -y \
-        curl python-openstackclient keystone supervisor \
-        uwsgi uwsgi-plugin-python mysql-client-5.7 python-pip && \
-        pip install --no-cache-dir shinto-cli[yaml]
+        curl python-openstackclient supervisor \
+        uwsgi uwsgi-plugin-python mysql-client-5.7 python3-pip libmysqlclient-dev && \
+    pip3 install --no-cache-dir shinto-cli[yaml] mysqlclient && \
+    apt-get install -y keystone    
 
 expose 5000 35357
 
