@@ -80,12 +80,15 @@ services:
     depends_on:
       - agent-forwarder
 
+  # ZOO_AUTOPURGE_PURGEINTERVAL is the interval in hours to
+  # check the max amount of transactional-logs and snapshots
   zookeeper:
     hostname: docker-host
     image: zookeeper:${ZOOKEEPER_VERSION}
     restart: unless-stopped
     environment:
       LOGSTASH_FIELDS: "service=zookeeper"
+      ZOO_AUTOPURGE_PURGEINTERVAL: "168"
 
   kafka:
     hostname: docker-host
