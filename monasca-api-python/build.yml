@@ -1,9 +1,0 @@
-repository: fest/api
-variants:
-  - tag: 2.0.6
-    aliases:
-      - :pike-{date}-{time}
-    args:
-      API_BRANCH: stable/pike
-      CONSTRAINTS_BRANCH: stable/pike
-      TIMESTAMP_SLUG: 2.2.0

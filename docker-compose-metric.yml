@@ -142,7 +142,7 @@ services:
 
   monasca:
     hostname: docker-host
-    image: fest/api:${MON_API_VERSION}
+    image: monasca/api:${MON_API_VERSION}
     restart: unless-stopped
     environment:
       LOGSTASH_FIELDS: "service=monasca-api"
@@ -151,6 +151,8 @@ services:
       KEYSTONE_ADMIN_USER: ${MON_KEYSTONE_ADMIN_USER}
       KEYSTONE_ADMIN_PASSWORD: ${MON_KEYSTONE_ADMIN_PASSWORD}
       DELEGATE_AUTHORIZED_ROLES: "monitoring-delegate"
+      ENABLE_METRICS_API: 'true'
+      ENABLE_LOGS_API: 'false'
     depends_on:
       - influxdb
       - mysql
