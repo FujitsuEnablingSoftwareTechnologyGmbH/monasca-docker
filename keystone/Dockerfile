@@ -1,6 +1,10 @@
-from ubuntu:16.04
+from ubuntu:18.04
+ENV DEBIAN_FRONTEND=noninteractive
 
 run apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository cloud-archive:train && \
+    apt-get update && \
     apt-get install -y \
         curl python-openstackclient keystone supervisor \
         uwsgi uwsgi-plugin-python mysql-client-5.7 python-pip && \

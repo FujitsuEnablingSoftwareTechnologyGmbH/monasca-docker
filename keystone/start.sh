@@ -59,11 +59,3 @@ else
 fi
 
 supervisord --nodaemon -c /etc/supervisor/supervisord.conf
-
-if [[ -e /kill-supervisor ]]; then
-    echo "Exiting uncleanly due to bootstrap failure!"
-    exit 1
-else
-    echo "Exiting cleanly..."
-    exit 0
-fi
