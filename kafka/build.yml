@@ -1,6 +1,6 @@
 repository: fest/kafka
 variants:
-  - tag: 2.12-2.0.1-0.0.1
+  - tag: 2.12-2.0.1-0.0.2
     aliases:
       - :pike-{date}-{time}
     args:
