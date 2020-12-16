@@ -150,7 +150,7 @@ NF_SLACK_PROXY=
 # Image versions
 ################################################################################
 # Metric pipeline
-INFLUXDB_VERSION=1.3.4-alpine
+INFLUXDB_VERSION=1.8-alpine
 INFLUXDB_INIT_VERSION=2.0.0
 
 MYSQL_VERSION=5.7

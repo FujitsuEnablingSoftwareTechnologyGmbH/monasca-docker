@@ -13,6 +13,7 @@ services:
     image: influxdb:${INFLUXDB_VERSION}
     restart: unless-stopped
     environment:
+      INFLUXDB_DATA_INDEX_VERSION: "tsi1"
       INFLUXDB_DATA_QUERY_LOG_ENABLED: "false"
       INFLUXDB_HTTP_LOG_ENABLED: "false"
       INFLUXDB_REPORTING_DISABLED: "true"
