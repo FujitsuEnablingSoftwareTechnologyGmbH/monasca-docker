@@ -21,7 +21,7 @@ FROM logstash:${LOGSTASH_VERSION}
 ENV DEBUG=false \
     MONASCA_WAIT_FOR_LOG_API=true \
     MONASCA_WAIT_FOR_KEYSTONE=true \
-    MONASCA_LOG_API_URL=http://log-api:8070/v3.0 \
+    MONASCA_LOG_API_URL=http://log-api:8070/v2.0 \
     OS_AUTH_URL=http://keystone:35357/v3 \
     OS_USERNAME=monasca-agent \
     OS_PASSWORD=password \
