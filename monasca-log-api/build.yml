@@ -1,9 +1,0 @@
-repository: fest/log-api
-variants:
-  - tag: 2.0.8
-    aliases:
-      - :pike-{date}-{time}
-    args:
-      LOG_API_BRANCH: stable/pike
-      CONSTRAINTS_BRANCH: stable/pike
-      TIMESTAMP_SLUG: 2.2.0

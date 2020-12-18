@@ -21,7 +21,7 @@ FROM logstash:${LOGSTASH_VERSION}
 ENV DEBUG=false \
     MONASCA_WAIT_FOR_LOG_API=true \
     MONASCA_WAIT_FOR_KEYSTONE=true \
-    MONASCA_LOG_API_URL=http://log-api:5607/v3.0 \
+    MONASCA_LOG_API_URL=http://log-api:8070/v3.0 \
     OS_AUTH_URL=http://keystone:35357/v3 \
     OS_USERNAME=monasca-agent \
     OS_PASSWORD=password \
@@ -39,8 +39,7 @@ RUN apk add --no-cache wget ca-certificates curl && \
 COPY --from=builder /lomla/logstash-output-monasca_log_api-*.gem /
 
 ARG REBUILD_INSTALL_LOGSTASH_PLUGINS=1
-RUN logstash-plugin install logstash-output-monasca_log_api-*.gem && \
-    logstash-plugin install logstash-filter-json_encode
+RUN logstash-plugin install logstash-output-monasca_log_api-*.gem
 
 COPY monasca-log-agent.conf.j2 start.sh /
 

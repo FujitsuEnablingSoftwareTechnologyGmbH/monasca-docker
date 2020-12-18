@@ -99,21 +99,25 @@ services:
 
   log-api:
     hostname: docker-host
-    image: fest/log-api:${MON_LOG_API_VERSION}
+    image: monasca/api:${MON_API_VERSION}
     restart: unless-stopped
     environment:
-      LOGSPOUT: ignore
-      LOGSTASH_FIELDS: "service=monasca-log-api"
+      LOGSTASH_FIELDS: "service=monasca-api"
       KEYSTONE_IDENTITY_URI: ${MON_KEYSTONE_URL}
       KEYSTONE_AUTH_URI: ${MON_KEYSTONE_URL}
       KEYSTONE_ADMIN_USER: ${MON_KEYSTONE_ADMIN_USER}
       KEYSTONE_ADMIN_PASSWORD: ${MON_KEYSTONE_ADMIN_PASSWORD}
+      DELEGATE_AUTHORIZED_ROLES: "monitoring-delegate"
+      ENABLE_METRICS_API: 'false'
+      ENABLE_LOGS_API: 'true'
     depends_on:
+      - influxdb
+      - mysql
       - zookeeper
       - kafka
       - memcached
     ports:
-      - "5607:5607"
+      - "5607:8070"
 
   log-agent:
     hostname: docker-host
