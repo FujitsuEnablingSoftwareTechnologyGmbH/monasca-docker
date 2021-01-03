@@ -216,8 +216,8 @@ services:
 
   monasca-notification:
     hostname: docker-host
-    image: fest/notification:${MON_NOTIFICATION_VERSION}
-    restart: on-failure
+    image: monasca/notification:${MON_NOTIFICATION_VERSION}
+    restart: unless-stopped
     environment:
       NF_PLUGINS: ${NF_PLUGINS}
       NF_EMAIL_SERVER: ${NF_EMAIL_SERVER}
@@ -228,10 +228,6 @@ services:
       NF_WEBHOOK_TIMEOUT: ${NF_WEBHOOK_TIMEOUT}
       NF_PAGERDUTY_TIMEOUT: ${NF_PAGERDUTY_TIMEOUT}
       NF_PAGERDUTY_URL: ${NF_PAGERDUTY_URL}
-      NF_HIPCHAT_TIMEOUT: ${NF_HIPCHAT_TIMEOUT}
-      NF_HIPCHAT_SSL_CERTS: ${NF_HIPCHAT_SSL_CERTS}
-      NF_HIPCHAT_INSECURE: ${NF_HIPCHAT_INSECURE}
-      NF_HIPCHAT_PROXY: ${NF_HIPCHAT_PROXY}
       NF_SLACK_TIMEOUT: ${NF_SLACK_TIMEOUT}
       NF_SLACK_CERTS: ${NF_SLACK_CERTS}
       NF_SLACK_INSECURE: ${NF_SLACK_INSECURE}
@@ -240,6 +236,9 @@ services:
       # To avoid endless “Warning”-logs from the notification service,
       # the log level is set to CRITICAL
       MONASCASTATSD_LOG_LEVEL: "CRITICAL"
+      LOG_LEVEL: INFO
+      LOG_LEVEL_KAFKA: INFO
+      LOG_LEVEL_PLUGINS: DEBUG
       LOGSTASH_FIELDS: "service=monasca-notification"
     depends_on:
       - monasca
