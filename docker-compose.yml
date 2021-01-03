@@ -168,14 +168,19 @@ services:
 
   monasca:
     hostname: docker-host
-    image: fest/api:${MON_API_VERSION}
-    restart: on-failure
+    image: monasca/api:${MON_API_VERSION}
+    restart: unless-stopped
     environment:
       LOGSTASH_FIELDS: "service=monasca-api"
+      KEYSTONE_IDENTITY_URI: ${MON_KEYSTONE_URL}
+      KEYSTONE_AUTH_URI: ${MON_KEYSTONE_URL}
+      KEYSTONE_ADMIN_USER: ${MON_KEYSTONE_ADMIN_USER}
+      KEYSTONE_ADMIN_PASSWORD: ${MON_KEYSTONE_ADMIN_PASSWORD}
       DELEGATE_AUTHORIZED_ROLES: "monitoring-delegate"
+      ENABLE_METRICS_API: 'true'
+      ENABLE_LOGS_API: 'false'
     depends_on:
       - influxdb
-      - keystone
       - mysql
       - zookeeper
       - kafka
@@ -185,10 +190,11 @@ services:
 
   monasca-persister:
     hostname: docker-host
-    image: fest/persister:${MON_PERSISTER_VERSION}
-    restart: on-failure
+    image: monasca/persister:${MON_PERSISTER_VERSION}
+    restart: unless-stopped
     environment:
       LOGSTASH_FIELDS: "service=monasca-persister"
+      KAFKA_LEGACY_CLIENT_ENABLED: "false"
     depends_on:
       - monasca
       - influxdb
