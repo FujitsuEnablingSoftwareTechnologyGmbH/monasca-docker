@@ -1,6 +1,19 @@
 version: '2'
 services:
 
+  horizon:
+    hostname: docker-host
+    image: fest/horizon:${HORIZON_VERSION}
+    restart: unless-stopped
+    environment:
+      MON_KEYSTONE_URL: ${MON_KEYSTONE_URL}
+      GRAFANA_IP: ${MON_GRAFANA_IP}
+      GRAFANA_PORT: ${MON_GRAFANA_PORT}
+    depends_on:
+      - keystone
+    ports:
+      - "80:80"
+        
   memcached:
     hostname: docker-host
     image: memcached:${MEMCACHED_VERSION}
@@ -20,6 +33,7 @@ services:
     volumes:
     - "${MON_DOCKER_VOL_ROOT}/influxdb:/var/lib/influxdb:Z"
     - "${MON_BACKUP_DIR}/influxdb_backup:/influxdb_backup:Z"
+
   influxdb-init:
     hostname: docker-host
     image: fest/influxdb-init:${INFLUXDB_INIT_VERSION}
@@ -126,19 +140,38 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: secretmysql
       LOGSTASH_FIELDS: "service=mysql"
-    volumes:
-    - "${MON_DOCKER_VOL_ROOT}/mysql:/var/lib/mysql:Z"
-    - "${MON_BACKUP_DIR}/mysql_backup:/mysql_backup:Z"
+      #volumes:
+            #- "${MON_DOCKER_VOL_ROOT}/mysql:/var/lib/mysql:Z"
+            #- "${MON_BACKUP_DIR}/mysql_backup:/mysql_backup:Z"
+
   mysql-init:
     hostname: docker-host
-    image: fest/mysql-init:${MYSQL_INIT_VERSION}
+    image: monasca/mysql-init:${MYSQL_INIT_VERSION}
     environment:
-      KEYSTONE_DB_ENABLED: "false"
       MYSQL_INIT_DISABLE_REMOTE_ROOT: "false"
       MYSQL_INIT_RANDOM_PASSWORD: "false"
       LOGSTASH_FIELDS: "service=mysql-init"
     depends_on:
       - mysql
+
+  keystone:
+    hostname: docker-host
+    image: monasca/keystone:${MON_KEYSTONE_VERSION}
+    environment:
+      KEYSTONE_HOST: keystone
+      KEYSTONE_PASSWORD: secretadmin
+      KEYSTONE_DATABASE_BACKEND: mysql
+      KEYSTONE_MYSQL_HOST: mysql
+      KEYSTONE_MYSQL_USER: keystone
+      KEYSTONE_MYSQL_PASSWORD: keystone
+      KEYSTONE_MYSQL_DATABASE: keystone
+      KEYSTONE_MONASCA_ENDPOINT: ${MON_MONASCA_API_URL}
+      LOGSTASH_FIELDS: "service=keystone"
+    depends_on:
+      - mysql
+    ports:
+      - "5000:5000"
+      - "35357:35357"
 
   monasca:
     hostname: docker-host
@@ -153,6 +186,8 @@ services:
       DELEGATE_AUTHORIZED_ROLES: "monitoring-delegate"
       ENABLE_METRICS_API: 'true'
       ENABLE_LOGS_API: 'false'
+      GUNICORN_WORKERS: '4'
+      GUNICORN_TIMEOUT: '60'
     depends_on:
       - influxdb
       - mysql
@@ -190,7 +225,7 @@ services:
 
   monasca-notification:
     hostname: docker-host
-    image: fest/notification:${MON_NOTIFICATION_VERSION}
+    image: monasca/notification:${MON_NOTIFICATION_VERSION}
     restart: unless-stopped
     environment:
       NF_PLUGINS: ${NF_PLUGINS}
@@ -220,6 +255,15 @@ services:
       - zookeeper
       - kafka
       - mysql
+
+  monasca-statsd:
+    image: monasca/statsd:${MON_STATSD_VERSION}
+    environment:
+      FORWARDER_URL: http://agent-forwarder:17123
+      LOG_LEVEL: WARN
+    ports:
+      - "8125/udp"
+
 
   grafana:
     hostname: docker-host

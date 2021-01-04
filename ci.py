@@ -17,22 +17,35 @@
 
 from __future__ import print_function
 
+import argparse
 import datetime
 import gzip
 import json
+import logging
 import os
 import re
 import shutil
 import signal
+import six
 import subprocess
 import sys
 import time
 import yaml
 
-import six
 from google.oauth2 import service_account
 from google.cloud import storage
+logging.basicConfig(format = '%(asctime)s %(levelname).4s [%(name)s] [%(lineno)4d]  %(message)s [%(funcName)s] ')
+LOG=logging.getLogger(__name__)
+LOG.setLevel(logging.DEBUG)
 
+
+parser = argparse.ArgumentParser(description='CI command')
+parser.add_argument('-p', '--pipeline', dest='pipeline', default=None, required=True,
+                    help='Select the pipeline [metrics|logs]')
+parser.add_argument('-nv', '--non-voting', dest='non_voting', action='store_true',
+                    help='Set the check as non-voting')
+args = parser.parse_args()
+LOG.debug(args)
 
 TAG_REGEX = re.compile(r'^!(\w+)(?:\s+([\w-]+))?$')
 
@@ -55,7 +68,8 @@ METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES = {
     'keystone': 'keystone',
     'horizon': 'horizon',
     'monasca-notification': 'monasca-notification',
-    'grafana-init': 'grafana-init'
+    'grafana-init': 'grafana-init',
+    'monasca-statsd': 'monasca-statsd'
 }
 LOGS_PIPELINE_MODULE_TO_COMPOSE_SERVICES = {
     'monasca-log-metrics': 'log-metrics',
@@ -86,17 +100,16 @@ LOG_PIPELINE_SERVICES = (['kafka', 'keystone'] +
 to launch for logs pipeline"""
 
 PIPELINE_TO_YAML_COMPOSE = {
-    METRIC_PIPELINE_MARKER: 'docker-compose.yml',
-    LOG_PIPELINE_MARKER: 'log-pipeline.yml'
+    METRIC_PIPELINE_MARKER: 'docker-compose-metric.yml',
+    LOG_PIPELINE_MARKER: 'docker-compose-log.yml'
 }
 
 CI_COMPOSE_FILE = 'ci-compose.yml'
 
-LOG_DIR = 'monasca-docker/' + \
-          datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + \
-          '_monasca_logs/'
-BUILD_LOG_DIR = LOG_DIR + 'build/'
-RUN_LOG_DIR = LOG_DIR + 'run/'
+LOG_DIR = 'monasca-logs/' + \
+          datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+BUILD_LOG_DIR = LOG_DIR + '/build/'
+RUN_LOG_DIR = LOG_DIR + '/run/'
 LOG_DIRS = [LOG_DIR, BUILD_LOG_DIR, RUN_LOG_DIR]
 MAX_RAW_LOG_SIZE = 1024L  # 1KiB
 
@@ -136,10 +149,10 @@ def print_logs():
 
 
 def get_client():
-    print('XXXX>get_client() BEGIN')
+    LOG.info('get_client() BEGIN')
     cred_dict_str = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', None)
     if not cred_dict_str:
-        print ('Could not found GCP credentials in environment variables')
+        LOG.warn('Could not found GCP credentials in environment variables')
         return None
 
     cred_dict = json.loads(cred_dict_str)
@@ -147,15 +160,15 @@ def get_client():
         credentials = service_account.Credentials.from_service_account_info(cred_dict)
         return storage.Client(credentials=credentials, project='monasca-ci-logs')
     except Exception as e:
-        print ('Unexpected error getting GCP credentials: {}'.format(e))
+        LOG.error('Unexpected error getting GCP credentials: {}'.format(e))
         return None
 
 
 def upload_log_files():
-    print('XXXX>upload_log_files() BEGIN')
+    LOG.info('upload_log_files() BEGIN')
     client = get_client()
     if not client:
-        print ('Could not upload logs to GCP. Then printing them on screen.')
+        LOG.warn('Could not upload logs to GCP. Then printing them on screen.')
         return print_logs()
     bucket = client.bucket('monasca-ci-logs')
 
@@ -167,10 +180,10 @@ def upload_log_files():
 
 
 def upload_manifest(pipeline, voting, uploaded_files, dirty_modules, files, tags):
-    print('XXXX>upload_manifest() BEGIN')
+    LOG.info('upload_manifest() BEGIN')
     client = get_client()
     if not client:
-        print ('Could not upload logs to GCP')
+        LOG.warn('Could not upload logs to GCP')
         return
     bucket = client.bucket('monasca-ci-logs')
 
@@ -201,7 +214,7 @@ def upload_manifest(pipeline, voting, uploaded_files, dirty_modules, files, tags
 
 
 def upload_files(log_dir, bucket):
-    print('XXXX>upload_files() BEGIN')
+    LOG.info('upload_files() BEGIN')
     uploaded_files = {}
     blob = bucket.blob(log_dir)
     for f in os.listdir(log_dir):
@@ -220,7 +233,7 @@ def upload_files(log_dir, bucket):
 
 def upload_file(bucket, file_path, file_str=None, content_type='text/plain',
                 content_encoding=None):
-    print('XXXX>upload_file() BEGIN')
+    LOG.info('upload_file() BEGIN')
     try:
         blob = bucket.blob(file_path)
         if content_encoding:
@@ -235,32 +248,38 @@ def upload_file(bucket, file_path, file_str=None, content_type='text/plain',
         if isinstance(url, six.binary_type):
             url = url.decode('utf-8')
 
-        print ('Public url for log: {}'.format(url))
+        LOG.info('Public url for log: {}'.format(url))
         return url
     except Exception as e:
-        print ('Unexpected error uploading log files to {}'
+        LOG.error('Unexpected error uploading log files to {}'
                'Skipping upload. Got: {}'.format(file_path, e))
         if content_encoding == 'gzip':
             f = gzip.open(file_path, 'r')
         else:
             f = open(file_path, 'r')
         log_contents = f.read()
-        print(log_contents)
+        LOG.error(log_contents)
         f.close()
 
 
 def set_log_dir():
-    print('XXXX>set_log_dir() BEGIN')
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR)
-    if not os.path.exists(BUILD_LOG_DIR):
-        os.makedirs(BUILD_LOG_DIR)
-    if not os.path.exists(RUN_LOG_DIR):
-        os.makedirs(RUN_LOG_DIR)
+    try:
+        LOG.debug('Working directory: {0}'.format(os.getcwd()))
+        if not os.path.exists(LOG_DIR):
+            LOG.debug('Creating LOG_DIR: {0}'.format(LOG_DIR))
+            os.makedirs(LOG_DIR)
+        if not os.path.exists(BUILD_LOG_DIR):
+            LOG.debug('Creating BUILD_LOG_DIR: {0}'.format(BUILD_LOG_DIR))
+            os.makedirs(BUILD_LOG_DIR)
+        if not os.path.exists(RUN_LOG_DIR):
+            LOG.debug('Creating RUN_LOG_DIR: {0}'.format(RUN_LOG_DIR))
+            os.makedirs(RUN_LOG_DIR)
+    except Exception as e:
+        LOG.error('Unexpected error {0}'.format(e))
 
 
 def get_changed_files():
-    print('XXXX>get_changed_files() BEGIN')
+    LOG.info('get_changed_files() BEGIN')
     commit_range = os.environ.get('TRAVIS_COMMIT_RANGE', None)
     if not commit_range:
         return []
@@ -277,7 +296,7 @@ def get_changed_files():
 
 
 def get_message_tags():
-    print('XXXX>get_message_tags() BEGIN')
+    LOG.info('get_message_tags() BEGIN')
     commit = os.environ.get('TRAVIS_COMMIT_RANGE', None)
     if not commit:
         return []
@@ -300,7 +319,7 @@ def get_message_tags():
 
 
 def get_dirty_modules(dirty_files):
-    print('XXXX>get_dirty_modules() BEGIN')
+    LOG.info('get_dirty_modules() BEGIN')
     dirty = set()
     for f in dirty_files:
         if os.path.sep in f:
@@ -315,14 +334,14 @@ def get_dirty_modules(dirty_files):
             dirty.add(mod)
 
 #    if len(dirty) > 5:
-#        print ('Max number of changed modules exceded. '
-#               'Please break up the patch set until a maximum of 5 modules are changed.')
+#        LOG.error('Max number of changed modules exceded.',
+#                  'Please break up the patch set until a maximum of 5 modules are changed.')
 #        sys.exit(1)
     return list(dirty)
 
 
 def get_dirty_for_module(files, module=None):
-    print('XXXX>get_dirty_for_module() BEGIN')
+    LOG.info('get_dirty_for_module() BEGIN')
     ret = []
     for f in files:
         if os.path.sep in f:
@@ -338,10 +357,10 @@ def get_dirty_for_module(files, module=None):
 
 
 def run_build(modules):
-    print('XXXX>run_build() BEGIN')
+    LOG.info('run_build() BEGIN')
     log_dir = BUILD_LOG_DIR
     build_args = ['dbuild', '-sd', '--build-log-dir', log_dir, 'build', 'all', '+', ':ci-cd'] + modules
-    print('build command:', build_args)
+    LOG.info('build command:', build_args)
 
     p = subprocess.Popen(build_args)
 
@@ -353,29 +372,29 @@ def run_build(modules):
 
     signal.signal(signal.SIGINT, kill)
     if p.wait() != 0:
-        print('build failed, exiting!')
+        LOG.error('build failed, exiting!')
         sys.exit(p.returncode)
 
 
 def run_push(modules, pipeline):
-    print('XXXX>run_push(modules) BEGIN')
+    LOG.info('run_push(modules) BEGIN')
 
     if pipeline == 'logs':
-        print('images are already pushed by metrics-pipeline, skipping!')
+        LOG.info('images are already pushed by metrics-pipeline, skipping!')
         return
 
     if os.environ.get('TRAVIS_SECURE_ENV_VARS', None) != "true":
-        print('No push permissions in this context, skipping!')
-        print('Not pushing: %r' % modules)
+        LOG.info('No push permissions in this context, skipping!')
+        LOG.info('Not pushing: %r' % modules)
         return
 
     username = os.environ.get('DOCKER_HUB_USERNAME', None)
     password = os.environ.get('DOCKER_HUB_PASSWORD', None)
-    print('XXXX>run_push(modules) username', username)
-    print('XXXX>run_push(modules) password', password)
+    #LOG.info('run_push(modules) username', username)
+    #LOG.info('run_push(modules) password', password)
 
     if username and password:
-        print('Logging into docker registry...')
+        LOG.info('Logging into docker registry...')
         login = subprocess.Popen([
             'docker', 'login',
             '-u', username,
@@ -383,12 +402,12 @@ def run_push(modules, pipeline):
         ], stdin=subprocess.PIPE)
         login.communicate(password)
         if login.returncode != 0:
-            print('Docker registry login failed, cannot push!')
+            LOG.error('Docker registry login failed, cannot push!')
             sys.exit(1)
 
     log_dir = BUILD_LOG_DIR
     push_args = ['dbuild', '-sd', '--build-log-dir', log_dir, 'build', 'push', 'all'] + modules
-    print('push command:', push_args)
+    LOG.info('push command:', push_args)
 
     p = subprocess.Popen(push_args)
 
@@ -405,15 +424,15 @@ def run_push(modules, pipeline):
 
 
 def run_readme(modules):
-    print('XXXX>run_readme() BEGIN')
+    LOG.info('run_readme() BEGIN')
     if os.environ.get('TRAVIS_SECURE_ENV_VARS', None) != "true":
-        print('No Docker Hub permissions in this context, skipping!')
-        print('Not updating READMEs: %r' % modules)
+        LOG.info('No Docker Hub permissions in this context, skipping!')
+        LOG.info('Not updating READMEs: %r' % modules)
         return
 
     log_dir = BUILD_LOG_DIR
     readme_args = ['dbuild', '-sd', '--build-log-dir', log_dir, 'readme'] + modules
-    print('readme command:', readme_args)
+    LOG.info('readme command:', readme_args)
 
     p = subprocess.Popen(readme_args)
 
@@ -425,17 +444,17 @@ def run_readme(modules):
 
     signal.signal(signal.SIGINT, kill)
     if p.wait() != 0:
-        print('build failed, exiting!')
+        LOG.error('build failed, exiting!')
         sys.exit(p.returncode)
 
 
 def update_docker_compose(modules, pipeline):
-    print('XXXX>update_docker_compose() BEGIN')
+    LOG.info('update_docker_compose() BEGIN')
     compose_dict = load_yml(PIPELINE_TO_YAML_COMPOSE['metrics'])
     services_to_changes = METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES.copy()
 
     if pipeline == 'logs':
-        print('\'logs\' pipeline is enabled, including in CI run')
+        LOG.info('\'logs\' pipeline is enabled, including in CI run')
         log_compose = load_yml(PIPELINE_TO_YAML_COMPOSE['logs'])
         compose_dict['services'].update(log_compose['services'])
         services_to_changes.update(
@@ -469,7 +488,7 @@ def update_docker_compose(modules, pipeline):
 
 
 def load_yml(yml_path):
-    print('XXXX>load_yml() BEGIN')
+    LOG.info('load_yml() BEGIN')
     try:
         with open(yml_path) as compose_file:
             compose_dict = yaml.safe_load(compose_file)
@@ -479,7 +498,7 @@ def load_yml(yml_path):
 
 
 def handle_pull_request(files, modules, tags, pipeline):
-    print('XXXX>handle_pull_request() BEGIN')
+    LOG.info('handle_pull_request() BEGIN')
     modules_to_build = modules[:]
 
     for tag, arg in tags:
@@ -499,11 +518,14 @@ def handle_pull_request(files, modules, tags, pipeline):
     if pipeline_modules:
         run_build(pipeline_modules)
     else:
-        print('No modules to build.')
+        LOG.info('No modules to build.')
 
     update_docker_compose(pipeline_modules, pipeline)
     run_docker_compose(pipeline)
     wait_for_init_jobs(pipeline)
+    LOG.info('Waiting for containers to be ready 3 min...')
+    time.sleep(180)
+    output_docker_ps()
 
     cool_test_mapper = {
         'smoke': {
@@ -521,7 +543,7 @@ def handle_pull_request(files, modules, tags, pipeline):
 
 
 def pick_modules_for_pipeline(modules, pipeline):
-    print('XXXX>pick_modules_for_pipeline() BEGIN')
+    LOG.info('pick_modules_for_pipeline() BEGIN')
     if not modules:
         return []
 
@@ -537,7 +559,7 @@ def pick_modules_for_pipeline(modules, pipeline):
     other_modules = [
         'storm'
     ]
-    print('modules: %s \n pipeline_modules: %s' % (modules, pipeline_modules))
+    LOG.info('modules: %s \n pipeline_modules: %s' % (modules, pipeline_modules))
 
     # iterate over copy of all modules that are planned for the build
     # if one of them does not belong to active pipeline
@@ -545,9 +567,9 @@ def pick_modules_for_pipeline(modules, pipeline):
     for m in modules[::]:
         if m not in pipeline_modules:
             if m in other_modules:
-                print('%s is not part of either pipeline, but it will be build anyway' % m)
+                LOG.info('%s is not part of either pipeline, but it will be build anyway' % m)
                 continue
-            print('Module %s does not belong to %s, skipping' % (
+            LOG.info('Module %s does not belong to %s, skipping' % (
                 m, pipeline
             ))
             modules.remove(m)
@@ -556,7 +578,7 @@ def pick_modules_for_pipeline(modules, pipeline):
 
 
 def get_current_init_status(docker_id):
-    print('XXXX>get_current_init_status() BEGIN')
+    LOG.info('get_current_init_status() BEGIN')
     init_status = ['docker', 'inspect', '-f', '{{ .State.ExitCode }}:{{ .State.Status }}', docker_id]
     p = subprocess.Popen(init_status, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
@@ -571,7 +593,7 @@ def get_current_init_status(docker_id):
     output, err = p.communicate()
 
     if p.wait() != 0:
-        print('getting current status failed')
+        LOG.info('getting current status failed')
         return False
     status_output = output.rstrip()
 
@@ -580,7 +602,7 @@ def get_current_init_status(docker_id):
 
 
 def output_docker_logs():
-    print('XXXX>output_docker_logs() BEGIN')
+    LOG.info('output_docker_logs() BEGIN')
     docker_names = ['docker', 'ps', '-a', '--format', '"{{.Names}}"']
 
     p = subprocess.Popen(docker_names, stdout=subprocess.PIPE)
@@ -607,11 +629,11 @@ def output_docker_logs():
                                  stderr=subprocess.STDOUT)
         signal.signal(signal.SIGINT, kill)
         if p.wait() != 0:
-            print('Error running docker log for {}'.format(name))
+            LOG.error('Error running docker log for {}'.format(name))
 
 
 def output_docker_ps():
-    print('XXXX>output_docker_ps() BEGIN')
+    LOG.info('output_docker_ps() BEGIN')
     docker_ps = ['docker', 'ps', '-a']
 
     docker_ps_process = subprocess.Popen(docker_ps)
@@ -624,21 +646,21 @@ def output_docker_ps():
 
     signal.signal(signal.SIGINT, kill)
     if docker_ps_process.wait() != 0:
-        print('Error running docker ps')
+        LOG.error('Error running docker ps')
 
 
 def output_compose_details(pipeline):
-    print('XXXX>output_compose_details() BEGIN')
-    print('Running docker-compose -f ', CI_COMPOSE_FILE)
+    LOG.info('output_compose_details() BEGIN')
+    LOG.info('Running docker-compose -f {0}'.format(CI_COMPOSE_FILE))
     if pipeline == 'metrics':
         services = METRIC_PIPELINE_SERVICES
     else:
         services = LOG_PIPELINE_SERVICES
-    print('All services that are about to start: ', services)
+    LOG.info('All services that are about to start: ', services)
 
 
 def get_docker_id(init_job):
-    print('XXXX>get_docker_id() BEGIN')
+    LOG.info('get_docker_id() BEGIN')
     docker_id = ['docker-compose',
                  '-f', CI_COMPOSE_FILE,
                  'ps',
@@ -657,13 +679,13 @@ def get_docker_id(init_job):
     output, err = p.communicate()
 
     if p.wait() != 0:
-        print('error getting docker id')
+        LOG.error('error getting docker id')
         return ""
     return output.rstrip()
 
 
 def wait_for_init_jobs(pipeline):
-    print('XXXX>wait_for_init_jobs() BEGIN')
+    LOG.info('wait_for_init_jobs() BEGIN')
     init_status_dict = {job: False for job in INIT_JOBS[pipeline]}
     docker_id_dict = {job: "" for job in INIT_JOBS[pipeline]}
 
@@ -682,13 +704,13 @@ def wait_for_init_jobs(pipeline):
                 if updated_status:
                     amount_succeeded += 1
         if amount_succeeded == len(docker_id_dict):
-            print("All init-jobs passed!")
+            LOG.info("All init-jobs passed!")
             break
         else:
-            print("Not all init jobs have succeeded. Attempt: " + str(attempt + 1) + " of 40")
+            LOG.info("Not all init jobs have succeeded. Attempt: " + str(attempt + 1) + " of 40")
 
     if amount_succeeded != len(docker_id_dict):
-        print("Init-jobs did not succeed, printing docker ps and logs")
+        LOG.error("Init-jobs did not succeed, printing docker ps and logs")
         raise InitJobFailedException()
 
     # Sleep in case jobs just succeeded
@@ -696,7 +718,7 @@ def wait_for_init_jobs(pipeline):
 
 
 def handle_push(files, modules, tags, pipeline):
-    print('XXXX>handle_push() BEGIN')
+    LOG.info('handle_push() BEGIN')
     modules_to_push = []
     modules_to_readme = []
 
@@ -726,17 +748,34 @@ def handle_push(files, modules, tags, pipeline):
     if modules_to_push:
         run_push(modules_to_push, pipeline)
     else:
-        print('No modules to push.')
+        LOG.info('No modules to push.')
 
     if modules_to_readme:
         run_readme(modules_to_readme)
     else:
-        print('No READMEs to update.')
+        LOG.info('No READMEs to update.')
 
 
 def run_docker_compose(pipeline):
-    print('Running docker compose')
+    LOG.info('Running docker compose')
     output_compose_details(pipeline)
+
+    username = os.environ.get('DOCKER_HUB_USERNAME', None)
+    password = os.environ.get('DOCKER_HUB_PASSWORD', None)
+    #LOG.info('run_push(modules) username', username)
+    #LOG.info('run_push(modules) password', password)
+
+    if username and password:
+        LOG.info('Logging into docker registry...')
+        login = subprocess.Popen([
+            'docker', 'login',
+            '-u', username,
+            '--password-stdin'
+        ], stdin=subprocess.PIPE)
+        login.communicate(password)
+        if login.returncode != 0:
+            LOG.error('Docker registry login failed, cannot push!')
+            sys.exit(1)
 
     if pipeline == 'metrics':
         services = METRIC_PIPELINE_SERVICES
@@ -758,16 +797,16 @@ def run_docker_compose(pipeline):
 
     signal.signal(signal.SIGINT, kill)
     if p.wait() != 0:
-        print('docker compose failed, exiting!')
+        LOG.error('docker compose failed, exiting!')
         sys.exit(p.returncode)
 
     # print out running images for debugging purposes
-    print('docker compose succeeded')
+    LOG.info('docker compose succeeded')
     output_docker_ps()
 
 
 def run_smoke_tests_metrics():
-    print ('Running Smoke-tests for stable/pike')
+    LOG.info('Running Smoke-tests')
     #TODO: branch as variable... use TRAVIS_PULL_REQUEST_BRANCH ?
     smoke_tests_run = ['docker', 'run', '-e', 'MONASCA_URL=http://monasca:8070', '-e',
                        'METRIC_NAME_TO_CHECK=monasca.thread_count', '--net', 'monasca-docker_default', '-p',
@@ -785,17 +824,19 @@ def run_smoke_tests_metrics():
 
     signal.signal(signal.SIGINT, kill)
     if p.wait() != 0:
-        print('Smoke-tests failed, listing containers/logs.')
+        LOG.error('Smoke-tests failed, listing containers/logs.')
         raise SmokeTestFailedException()
 
 
 def run_tempest_tests_metrics():
-    print ('Running Tempest-tests for stable/pike')
-    #TODO: branch as variable... use TRAVIS_PULL_REQUEST_BRANCH ?
-    tempest_tests_run = ['docker', 'run', '-e', 'KEYSTONE_SERVER=keystone', '-e',
-                         'KEYSTONE_PORT=5000', '--net', 'monasca-docker_default',
-                         'fest/tempest-tests:2.0.1']
-    #TODO: image name!
+    LOG.info('Running Tempest-tests')
+    tempest_tests_run = ['docker', 'run',
+                         '-e', 'OS_AUTH_URL=http://keystone:35357/v3',
+                         '-e', 'MONASCA_WAIT_FOR_API=true',
+                         '-e', 'STAY_ALIVE_ON_FAILURE=false',
+                         '--net', 'monasca-docker_default',
+                         '--name', 'monasca-tempest',
+                         'chaconpiza/tempest-tests:test']
 
     with open(LOG_DIR + 'tempest_tests.log', 'w') as out:
         p = subprocess.Popen(tempest_tests_run, stdout=out)
@@ -815,20 +856,20 @@ def run_tempest_tests_metrics():
                 print ('Tempest-tests timed out at 25 min')
                 raise TempestTestFailedException()
             if time_delta % 30 == 0:
-                print ('Still running tempest-tests')
+                LOG.info('Still running tempest-tests')
             time_delta += 1
             time.sleep(1)
         elif poll != 0:
-            print('Tempest-tests failed, listing containers/logs.')
+            LOG.info('Tempest-tests failed, listing containers/logs.')
             raise TempestTestFailedException()
         else:
             break
-    print('Tempest-tests succeeded')
+    LOG.info('Tempest-tests succeeded')
 
 
-def handle_other(files, modules, tags):
-    print('Unsupported event type "%s", nothing to do.' % (
-        os.environ.get('TRAVS_EVENT_TYPE')))
+def handle_other(files, modules, tags, pipeline):
+    LOG.warn('Unsupported event type "%s", nothing to do.' % (
+        os.environ.get('TRAVIS_EVENT_TYPE')))
 
 
 def print_env(pipeline, voting, to_print=True):
@@ -846,43 +887,41 @@ def print_env(pipeline, voting, to_print=True):
         'TRAVIS_COMMIT_MESSAGE': os.environ.get('TRAVIS_COMMIT_MESSAGE'),
         'TRAVIS_BUILD_ID': os.environ.get('TRAVIS_BUILD_ID'),
         'TRAVIS_JOB_NUMBER': os.environ.get('TRAVIS_JOB_NUMBER'),
-
         'CI_PIPELINE': pipeline,
         'CI_VOTING': voting }}
 
     if to_print:
-        print (json.dumps(environ_vars, indent=2))
+        LOG.info(json.dumps(environ_vars, indent=2))
     return environ_vars
 
 
 def main():
-    args = sys.argv[1:]
-    pipeline = args[0] if len(args) >= 1 else None
-    voting = bool(args[1]) if len(args) == 2 else True
+    pipeline = args.pipeline
+    voting = not args.non_voting
 
 #    if os.environ.get('TRAVIS_BRANCH', None) != 'master':
-#        print('Not master branch, skipping tests.')
-#        return
+#        LOG.warn('Not master branch, skipping tests.')
+#        exit(2)
     if not pipeline or pipeline not in ('logs', 'metrics'):
-        print('Unkown pipeline=', pipeline)
-        return
+        LOG.warn('Unkown pipeline: {0}'.format(pipeline))
+        exit(2)
 
     print_env(pipeline, voting)
     set_log_dir()
 
     files = get_changed_files()
-    print('XXXX>get_changed_files():', files)
+    LOG.info('get_changed_files():'.format(files))
     modules = get_dirty_modules(files)
-    print('XXXX>get_dirty_modules():', modules)
+    LOG.info('get_dirty_modules():'.format(modules))
     tags = get_message_tags()
-    print('XXXX>get_message_tags():', tags)
+    LOG.info('get_message_tags():'.format(tags))
 
     if tags:
-        print('Tags detected:')
+        LOG.debug('Tags detected:')
         for tag in tags:
-            print('  ', tag)
+            LOG.debug('  '.format(tag))
     else:
-        print('No tags detected.')
+        LOG.info('No tags detected.')
 
     func = {
         'pull_request': handle_pull_request,
@@ -899,7 +938,7 @@ def main():
         if voting:
             raise
         else:
-            print('%s is not voting, skipping failure' % pipeline)
+            LOG.info('{0} is not voting, skipping failure'.format(pipeline))
     finally:
         output_docker_ps()
         output_docker_logs()

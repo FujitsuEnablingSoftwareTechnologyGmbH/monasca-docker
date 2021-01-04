@@ -1,3 +1,4 @@
+dist: bionic
 sudo: required
 services:
   - docker
@@ -5,24 +6,40 @@ language: python
 python:
   - "2.7"
 
-env:
-  - IGNORE_DOCKER_VERSION=true PYTHONUNBUFFERED=true SCVERSION=stable
+addons:
+  apt:
+    sources:
+      - deadsnakes
+    packages:
+      - python3.6
+
+    #env:
+    #  - IGNORE_DOCKER_VERSION=true PYTHONUNBUFFERED=true SCVERSION=stable
 
 before_install:
-  - wget "https://github.com/koalaman/shellcheck/releases/download/$SCVERSION/shellcheck-$SCVERSION.linux.x86_64.tar.xz"
-  - tar --xz -xvf "shellcheck-$SCVERSION.linux.x86_64.tar.xz"
-  - shellcheck() { "shellcheck-$SCVERSION/shellcheck" "$@"; }
-  - shellcheck --version
-  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - free -h
+  - lscpu
+  - hostnamectl
+  - pwd
+  - ls -alh
+    #  - wget "https://github.com/koalaman/shellcheck/releases/download/$SCVERSION/shellcheck-$SCVERSION.linux.x86_64.tar.xz"
+    #  - tar --xz -xvf "shellcheck-$SCVERSION.linux.x86_64.tar.xz"
+    #  - shellcheck() { "shellcheck-$SCVERSION/shellcheck" "$@"; }
+    #  - shellcheck --version
+    #  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+    #  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
   - sudo apt-get update
-  - sudo apt-get -y install docker-ce
+    #  - sudo apt-get -y install docker-ce
+  - sudo apt-get install python3 python3-pip python3-setuptools
+  - pip3 install pip --upgrade
   - pip install pip --upgrade
   - pip install git+https://github.com/timothyb89/dbuild.git
   - pip install "six>=1.13.0"
   - pip install google-cloud-storage
-  - docker --version
-  - docker-compose --version
+  - pip3 install requests
+  - python3 check_docker_hub_limit.py || true
+  - docker version
+  - docker-compose version
   - ifconfig
   - if_ipaddr=$(ifconfig ens4 | awk '{ print $2}' | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}")
   - echo "Replacing ip addresses in .env file with dynamic travis ens4 ip:" $if_ipaddr
@@ -31,9 +48,10 @@ before_install:
 
 jobs:
   include:
-    - stage: lint-shellcheck
-      script: bash -c 'shopt -s globstar; shellcheck **/*.sh'
+          #- stage: lint-shellcheck
+          #  script: bash -c 'shopt -s globstar; shellcheck **/*.sh'
     - stage: metrics-pipeline
-      script: python ci.py metrics
+      script: python ci.py --pipeline metrics
+ 
     - stage: logs-pipeline
-      script: python ci.py logs False
+      script: python ci.py --pipeline logs --non-voting
