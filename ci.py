@@ -762,8 +762,6 @@ def run_docker_compose(pipeline):
 
     username = os.environ.get('DOCKER_HUB_USERNAME', None)
     password = os.environ.get('DOCKER_HUB_PASSWORD', None)
-    #LOG.info('run_push(modules) username', username)
-    #LOG.info('run_push(modules) password', password)
 
     if username and password:
         LOG.info('Logging into docker registry...')
@@ -774,7 +772,7 @@ def run_docker_compose(pipeline):
         ], stdin=subprocess.PIPE)
         login.communicate(password)
         if login.returncode != 0:
-            LOG.error('Docker registry login failed, cannot push!')
+            LOG.error('Docker registry login failed!')
             sys.exit(1)
 
     if pipeline == 'metrics':
