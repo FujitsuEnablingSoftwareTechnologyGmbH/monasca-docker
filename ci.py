@@ -523,8 +523,8 @@ def handle_pull_request(files, modules, tags, pipeline):
     update_docker_compose(pipeline_modules, pipeline)
     run_docker_compose(pipeline)
     wait_for_init_jobs(pipeline)
-    LOG.info('Waiting for containers to be ready 1 min...')
-    time.sleep(60)
+    LOG.info('Waiting for containers to be ready 5 min...')
+    time.sleep(300)
     output_docker_ps()
 
     cool_test_mapper = {
@@ -539,6 +539,8 @@ def handle_pull_request(files, modules, tags, pipeline):
     }
 
     cool_test_mapper['smoke'][pipeline]()
+    LOG.info('Waiting between smoke tests and tempest test 5 min...')
+    time.sleep(300)
     cool_test_mapper['tempest'][pipeline]()
 
 

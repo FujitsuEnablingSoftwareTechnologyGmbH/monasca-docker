@@ -186,7 +186,7 @@ services:
       DELEGATE_AUTHORIZED_ROLES: "monitoring-delegate"
       ENABLE_METRICS_API: 'true'
       ENABLE_LOGS_API: 'false'
-      GUNICORN_WORKERS: '4'
+      GUNICORN_WORKERS: '8'
       GUNICORN_TIMEOUT: '60'
     depends_on:
       - influxdb
