@@ -523,8 +523,8 @@ def handle_pull_request(files, modules, tags, pipeline):
     update_docker_compose(pipeline_modules, pipeline)
     run_docker_compose(pipeline)
     wait_for_init_jobs(pipeline)
-    LOG.info('Waiting for containers to be ready 3 min...')
-    time.sleep(180)
+    LOG.info('Waiting for containers to be ready 1 min...')
+    time.sleep(60)
     output_docker_ps()
 
     cool_test_mapper = {
