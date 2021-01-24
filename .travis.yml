@@ -22,12 +22,12 @@ before_install:
   - hostnamectl
   - pwd
   - ls -alh
-    #  - wget "https://github.com/koalaman/shellcheck/releases/download/$SCVERSION/shellcheck-$SCVERSION.linux.x86_64.tar.xz"
-    #  - tar --xz -xvf "shellcheck-$SCVERSION.linux.x86_64.tar.xz"
-    #  - shellcheck() { "shellcheck-$SCVERSION/shellcheck" "$@"; }
-    #  - shellcheck --version
-    #  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-    #  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - wget "https://github.com/koalaman/shellcheck/releases/download/$SCVERSION/shellcheck-$SCVERSION.linux.x86_64.tar.xz"
+  - tar --xz -xvf "shellcheck-$SCVERSION.linux.x86_64.tar.xz"
+  - shellcheck() { "shellcheck-$SCVERSION/shellcheck" "$@"; }
+  - shellcheck --version
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
   - sudo apt-get update
     #  - sudo apt-get -y install docker-ce
   - sudo apt-get install python3 python3-pip python3-setuptools
@@ -48,10 +48,11 @@ before_install:
 
 jobs:
   include:
-          #- stage: lint-shellcheck
-          #  script: bash -c 'shopt -s globstar; shellcheck **/*.sh'
     - stage: metrics-pipeline
       script: python ci.py --pipeline metrics
  
     - stage: logs-pipeline
       script: python ci.py --pipeline logs --non-voting
+
+    - stage: lint-shellcheck
+      script: bash -c 'shopt -s globstar; shellcheck **/*.sh'
