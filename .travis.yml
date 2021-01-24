@@ -12,9 +12,8 @@ addons:
       - deadsnakes
     packages:
       - python3.6
-
-    #env:
-    #  - IGNORE_DOCKER_VERSION=true PYTHONUNBUFFERED=true SCVERSION=stable
+    env:
+      - SCVERSION=stable
 
 before_install:
   - free -h
