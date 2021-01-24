@@ -12,8 +12,9 @@ addons:
       - deadsnakes
     packages:
       - python3.6
-    env:
-      - SCVERSION=stable
+
+env:
+  - SCVERSION=stable
 
 before_install:
   - free -h
