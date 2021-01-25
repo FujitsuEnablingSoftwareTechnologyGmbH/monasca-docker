@@ -1,7 +1,7 @@
 version: '2'
 services:
 
-  horizon:
+  horizon: # Remove this section in Production
     hostname: docker-host
     image: fest/horizon:${HORIZON_VERSION}
     restart: unless-stopped
@@ -13,7 +13,27 @@ services:
       - keystone
     ports:
       - "80:80"
-        
+
+  keystone: # Remove this section in Production
+    hostname: docker-host
+    image: monasca/keystone:${MON_KEYSTONE_VERSION}
+    restart: unless-stopped
+    environment:
+      KEYSTONE_HOST: keystone
+      KEYSTONE_PASSWORD: secretadmin
+      KEYSTONE_DATABASE_BACKEND: mysql
+      KEYSTONE_MYSQL_HOST: mysql
+      KEYSTONE_MYSQL_USER: keystone
+      KEYSTONE_MYSQL_PASSWORD: keystone
+      KEYSTONE_MYSQL_DATABASE: keystone
+      KEYSTONE_MONASCA_ENDPOINT: ${MON_MONASCA_API_URL}
+      LOGSTASH_FIELDS: "service=keystone"
+    depends_on:
+      - mysql
+    ports:
+      - "5000:5000"
+      - "35357:35357"
+
   memcached:
     hostname: docker-host
     image: memcached:${MEMCACHED_VERSION}
@@ -26,13 +46,14 @@ services:
     image: influxdb:${INFLUXDB_VERSION}
     restart: unless-stopped
     environment:
+      INFLUXDB_DATA_INDEX_VERSION: "tsi1"
       INFLUXDB_DATA_QUERY_LOG_ENABLED: "false"
       INFLUXDB_HTTP_LOG_ENABLED: "false"
       INFLUXDB_REPORTING_DISABLED: "true"
       LOGSTASH_FIELDS: "service=influxdb"
     volumes:
-    - "${MON_DOCKER_VOL_ROOT}/influxdb:/var/lib/influxdb:Z"
-    - "${MON_BACKUP_DIR}/influxdb_backup:/influxdb_backup:Z"
+      - "${MON_DOCKER_VOL_ROOT}/influxdb:/var/lib/influxdb:Z"
+      - "${MON_BACKUP_DIR}/influxdb_backup:/influxdb_backup:Z"
 
   influxdb-init:
     hostname: docker-host
@@ -111,9 +132,10 @@ services:
     environment:
       LOGSTASH_FIELDS: "service=kafka"
     volumes:
-    - "${MON_DOCKER_VOL_ROOT}/kafka:/data:Z"
+      - "${MON_DOCKER_VOL_ROOT}/kafka:/data:Z"
     depends_on:
       - zookeeper
+
   kafka-init:
     hostname: docker-host
     image: fest/kafka-init:${MON_KAFKA_INIT_VERSION}
@@ -140,9 +162,9 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: secretmysql
       LOGSTASH_FIELDS: "service=mysql"
-      #volumes:
-            #- "${MON_DOCKER_VOL_ROOT}/mysql:/var/lib/mysql:Z"
-            #- "${MON_BACKUP_DIR}/mysql_backup:/mysql_backup:Z"
+    volumes:
+      - "${MON_DOCKER_VOL_ROOT}/mysql:/var/lib/mysql:Z"
+      - "${MON_BACKUP_DIR}/mysql_backup:/mysql_backup:Z"
 
   mysql-init:
     hostname: docker-host
@@ -151,27 +173,10 @@ services:
       MYSQL_INIT_DISABLE_REMOTE_ROOT: "false"
       MYSQL_INIT_RANDOM_PASSWORD: "false"
       LOGSTASH_FIELDS: "service=mysql-init"
+      KEYSTONE_DB_ENABLED: 'true' # Default 'true'. Use 'false' in Production
+      CREATE_MON_USERS: 'true' # Default 'true'. Use 'false' in Production
     depends_on:
       - mysql
-
-  keystone:
-    hostname: docker-host
-    image: monasca/keystone:${MON_KEYSTONE_VERSION}
-    environment:
-      KEYSTONE_HOST: keystone
-      KEYSTONE_PASSWORD: secretadmin
-      KEYSTONE_DATABASE_BACKEND: mysql
-      KEYSTONE_MYSQL_HOST: mysql
-      KEYSTONE_MYSQL_USER: keystone
-      KEYSTONE_MYSQL_PASSWORD: keystone
-      KEYSTONE_MYSQL_DATABASE: keystone
-      KEYSTONE_MONASCA_ENDPOINT: ${MON_MONASCA_API_URL}
-      LOGSTASH_FIELDS: "service=keystone"
-    depends_on:
-      - mysql
-    ports:
-      - "5000:5000"
-      - "35357:35357"
 
   monasca:
     hostname: docker-host
@@ -212,13 +217,13 @@ services:
 
   thresh:
     hostname: docker-host
-    image: fest/thresh:${MON_THRESH_VERSION}
+    image: monasca/thresh:${MON_THRESH_VERSION}
     restart: unless-stopped
     environment:
       NO_STORM_CLUSTER: "true"
       WORKER_MAX_HEAP_MB: "768"
       LOGSTASH_FIELDS: "service=monasca-thresh"
-      LOG_LEVEL: "info"
+      LOG_LEVEL: "info" # Default 'info'. (debug|info|warn) #TODO check all log possibilities
     depends_on:
       - zookeeper
       - kafka
@@ -245,9 +250,6 @@ services:
       NF_SLACK_CERTS: ${NF_SLACK_CERTS}
       NF_SLACK_INSECURE: ${NF_SLACK_INSECURE}
       NF_SLACK_PROXY: ${NF_SLACK_PROXY}
-      # In the current CMM no StatsD daemon is deployed.
-      # To avoid endless “Warning”-logs from the notification service,
-      # the log level is set to CRITICAL
       MONASCASTATSD_LOG_LEVEL: "CRITICAL"
       LOGSTASH_FIELDS: "service=monasca-notification"
     depends_on:
@@ -258,12 +260,12 @@ services:
 
   monasca-statsd:
     image: monasca/statsd:${MON_STATSD_VERSION}
+    restart: unless-stopped
     environment:
       FORWARDER_URL: http://agent-forwarder:17123
       LOG_LEVEL: WARN
     ports:
       - "8125/udp"
-
 
   grafana:
     hostname: docker-host
