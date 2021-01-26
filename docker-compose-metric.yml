@@ -141,7 +141,7 @@ services:
       MYSQL_INIT_RANDOM_PASSWORD: "false"
       LOGSTASH_FIELDS: "service=mysql-init"
       KEYSTONE_DB_ENABLED: 'false'
-      CREATE_MON_USERS: 'false'
+      CREATE_MON_USERS: 'true'
     depends_on:
       - mysql
 
