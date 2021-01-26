@@ -139,9 +139,11 @@ services:
     environment:
       MYSQL_INIT_DISABLE_REMOTE_ROOT: "false"
       MYSQL_INIT_RANDOM_PASSWORD: "false"
-      LOGSTASH_FIELDS: "service=mysql-init"
       KEYSTONE_DB_ENABLED: 'false'
-      CREATE_MON_USERS: 'true'
+      CREATE_MON_USERS: "true"
+      GRAFANA_DB_ENABLED: "true"
+      MYSQL_INIT_HOST: "mysql"
+      LOGSTASH_FIELDS: "service=mysql-init"
     depends_on:
       - mysql
 

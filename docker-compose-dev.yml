@@ -21,13 +21,15 @@ services:
   mysql-init_keystone:
     hostname: dev-host
     #image: fest/mysql-init:${MYSQL_INIT_VERSION}
-    image: fest/mysql-init:2.0.0
+    #image: fest/mysql-init:2.0.0
+    image: monasca/mysql-init:${MYSQL_INIT_VERSION}
     environment:
+      MYSQL_INIT_DISABLE_REMOTE_ROOT: "false"
+      MYSQL_INIT_RANDOM_PASSWORD: "false"
+      KEYSTONE_DB_ENABLED: 'true'
       CREATE_MON_USERS: "false"
       GRAFANA_DB_ENABLED: "false"
       MYSQL_INIT_HOST: mysql_keystone
-      MYSQL_INIT_DISABLE_REMOTE_ROOT: "false"
-      MYSQL_INIT_RANDOM_PASSWORD: "false"
       LOGSTASH_FIELDS: "service=mysql_keystone-init"
     networks:
       - default
@@ -37,19 +39,21 @@ services:
   keystone:
     hostname: dev-host
     #image: fest/keystone:${MON_KEYSTONE_VERSION}
-    image: fest/keystone:2.0.2
+    #image: fest/keystone:2.0.2
+    image: monasca/keystone:1.2.0
     restart: unless-stopped
     environment:
       #KEYSTONE_HOST: ${MON_KEYSTONE_IP_ADDR}
-      KEYSTONE_HOST: "192.168.188.110"
+      #KEYSTONE_HOST: "192.168.188.110"
+      KEYSTONE_HOST: dev-host
       KEYSTONE_PASSWORD: secretadmin
       KEYSTONE_DATABASE_BACKEND: mysql
       KEYSTONE_MYSQL_HOST: mysql_keystone
       KEYSTONE_MYSQL_USER: keystone
       KEYSTONE_MYSQL_PASSWORD: keystone
       KEYSTONE_MYSQL_DATABASE: keystone
-      #KEYSTONE_MONASCA_ENDPOINT: ${MON_MONASCA_API_URL}
-      KEYSTONE_MONASCA_ENDPOINT: "http://192.168.188.110:8070/v2.0"
+      KEYSTONE_MONASCA_ENDPOINT: ${MON_MONASCA_API_URL}
+      #KEYSTONE_MONASCA_ENDPOINT: "http://192.168.188.110:8070/v2.0"
       LOGSTASH_FIELDS: "service=keystone"
     depends_on:
       - mysql_keystone
@@ -65,12 +69,12 @@ services:
     image: fest/horizon:2.0.6
     restart: unless-stopped
     environment:
-      #MON_KEYSTONE_URL: ${MON_KEYSTONE_URL}
-      MON_KEYSTONE_URL: "http://192.168.188.110:5000"
-      #GRAFANA_IP: ${MON_GRAFANA_IP}
-      GRAFANA_IP: "192.168.188.110"
-      #GRAFANA_PORT: ${MON_GRAFANA_PORT}
-      GRAFANA_PORT: "3000"
+      MON_KEYSTONE_URL: ${MON_KEYSTONE_URL}
+      #MON_KEYSTONE_URL: "http://192.168.188.110:5000"
+      GRAFANA_IP: ${MON_GRAFANA_IP}
+      #GRAFANA_IP: "192.168.188.110"
+      GRAFANA_PORT: ${MON_GRAFANA_PORT}
+      #GRAFANA_PORT: "3000"
     depends_on:
       - keystone
     ports:
