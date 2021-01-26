@@ -15,7 +15,6 @@
 # under the License.
 #
 
-from __future__ import print_function
 
 import argparse
 import datetime
@@ -37,7 +36,6 @@ from google.cloud import storage
 logging.basicConfig(format = '%(asctime)s %(levelname).4s [%(name)s] [%(lineno)4d]  %(message)s [%(funcName)s] ')
 LOG=logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
-
 
 parser = argparse.ArgumentParser(description='CI command')
 parser.add_argument('-p', '--pipeline', dest='pipeline', default=None, required=True,
@@ -65,8 +63,6 @@ METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES = {
     'influxdb-init': 'influxdb-init',
     'monasca-agent-collector': 'agent-collector',
     'grafana': 'grafana',
-    'keystone': 'keystone',
-    'horizon': 'horizon',
     'monasca-notification': 'monasca-notification',
     'grafana-init': 'grafana-init',
     'monasca-statsd': 'monasca-statsd'
@@ -94,7 +90,7 @@ INIT_JOBS = {
 METRIC_PIPELINE_SERVICES = METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES.values()
 """Explicit list of services for docker compose
 to launch for metrics pipeline"""
-LOG_PIPELINE_SERVICES = (['kafka', 'keystone'] +
+LOG_PIPELINE_SERVICES = (['kafka'] +
                          LOGS_PIPELINE_MODULE_TO_COMPOSE_SERVICES.values())
 """Explicit list of services for docker compose
 to launch for logs pipeline"""
@@ -145,7 +141,7 @@ def print_logs():
             if os.path.isfile(file_path):
                 with open(file_path, 'r') as f:
                     log_contents = f.read()
-                    print(log_contents)
+                    LOG.info(log_contents)
 
 
 def get_client():
@@ -530,11 +526,11 @@ def handle_pull_request(files, modules, tags, pipeline):
     cool_test_mapper = {
         'smoke': {
             METRIC_PIPELINE_MARKER: run_smoke_tests_metrics,
-            LOG_PIPELINE_MARKER: lambda : print('No smoke tests for logs')
+            LOG_PIPELINE_MARKER: lambda : LOG.info('No smoke tests for logs')
         },
         'tempest': {
             METRIC_PIPELINE_MARKER: run_tempest_tests_metrics,
-            LOG_PIPELINE_MARKER: lambda : print('No tempest tests for logs')
+            LOG_PIPELINE_MARKER: lambda : LOG.info('No tempest tests for logs')
         }
     }
 
@@ -713,9 +709,6 @@ def wait_for_init_jobs(pipeline):
         LOG.error("Init-jobs did not succeed, printing docker ps and logs")
         raise InitJobFailedException()
 
-    # Sleep in case jobs just succeeded
-    time.sleep(60)
-
 
 def handle_push(files, modules, tags, pipeline):
     LOG.info('handle_push() BEGIN')
@@ -754,6 +747,47 @@ def handle_push(files, modules, tags, pipeline):
         run_readme(modules_to_readme)
     else:
         LOG.info('No READMEs to update.')
+
+def run_docker_keystone():
+    LOG.info('Running docker compose for Keystone')
+
+    username = os.environ.get('DOCKER_HUB_USERNAME', None)
+    password = os.environ.get('DOCKER_HUB_PASSWORD', None)
+
+    if username and password:
+        LOG.info('Logging into docker registry...')
+        login = subprocess.Popen([
+            'docker', 'login',
+            '-u', username,
+            '--password-stdin'
+        ], stdin=subprocess.PIPE)
+        login.communicate(password)
+        if login.returncode != 0:
+            LOG.error('Docker registry login failed!')
+            sys.exit(1)
+
+
+    docker_compose_dev_command = ['docker-compose',
+                              '-f', 'docker-compose-dev.yml',
+                              'up', '-d']
+
+    with open(RUN_LOG_DIR + 'docker_compose_dev.log', 'w') as out:
+        p = subprocess.Popen(docker_compose_dev_command, stdout=out)
+
+    def kill(signal, frame):
+        p.kill()
+        print()
+        print('killed!')
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, kill)
+    if p.wait() != 0:
+        LOG.error('docker compose failed, exiting!')
+        sys.exit(p.returncode)
+
+    # print out running images for debugging purposes
+    LOG.info('docker compose dev succeeded')
+    output_docker_ps()
 
 
 def run_docker_compose(pipeline):
@@ -806,11 +840,15 @@ def run_docker_compose(pipeline):
 def run_smoke_tests_metrics():
     LOG.info('Running Smoke-tests')
     #TODO: branch as variable... use TRAVIS_PULL_REQUEST_BRANCH ?
-    smoke_tests_run = ['docker', 'run', '-e', 'MONASCA_URL=http://monasca:8070', '-e',
-                       'METRIC_NAME_TO_CHECK=monasca.thread_count', '--net', 'monasca-docker_default', '-p',
-                       '0.0.0.0:8080:8080', 'fest/smoke-tests:pike-latest']
+    smoke_tests_run = ['docker', 'run',
+                       '-e', 'OS_AUTH_URL=http://keystone:35357/v3',
+                       '-e', 'MONASCA_URL=http://monasca:8070',
+                       '-e', 'METRIC_NAME_TO_CHECK=monasca.thread_count',
+                       '--net', 'monasca-docker_default',
+                       '-p', '0.0.0.0:8080:8080',
+                       '--name', 'monasca-docker-smoke',
+                       'fest/smoke-tests:pike-latest']
     #TODO: repo has no stable/pike!
-    #TODO: image name!
 
     p = subprocess.Popen(smoke_tests_run)
 
@@ -829,11 +867,12 @@ def run_smoke_tests_metrics():
 def run_tempest_tests_metrics():
     LOG.info('Running Tempest-tests')
     tempest_tests_run = ['docker', 'run',
+                         '-e', 'KEYSTONE_IDENTITY_URI=http://keystone:35357',
                          '-e', 'OS_AUTH_URL=http://keystone:35357/v3',
                          '-e', 'MONASCA_WAIT_FOR_API=true',
                          '-e', 'STAY_ALIVE_ON_FAILURE=false',
                          '--net', 'monasca-docker_default',
-                         '--name', 'monasca-tempest',
+                         '--name', 'monasca-docker-tempest',
                          'chaconpiza/tempest-tests:test']
 
     with open(LOG_DIR + 'tempest_tests.log', 'w') as out:
@@ -920,6 +959,8 @@ def main():
             LOG.debug('  '.format(tag))
     else:
         LOG.info('No tags detected.')
+
+    run_docker_keystone()
 
     func = {
         'pull_request': handle_pull_request,
