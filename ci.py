@@ -33,7 +33,9 @@ import yaml
 
 from google.oauth2 import service_account
 from google.cloud import storage
-logging.basicConfig(format = '%(asctime)s %(levelname).4s [%(name)s] [%(lineno)4d]  %(message)s [%(funcName)s] ')
+
+#logging.basicConfig(format = '%(asctime)s %(levelname).5s [%(name)s] [%(lineno)4d]  %(message)s [%(funcName)s] ')
+logging.basicConfig(format = '%(asctime)s %(levelname).5s %(message)s')
 LOG=logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
@@ -875,33 +877,36 @@ def run_tempest_tests_metrics():
                          '--name', 'monasca-docker-tempest',
                          'chaconpiza/tempest-tests:test']
 
-    with open(LOG_DIR + 'tempest_tests.log', 'w') as out:
-        p = subprocess.Popen(tempest_tests_run, stdout=out)
+    p = subprocess.Popen(tempest_tests_run, stdout=subprocess.PIPE, universal_newlines=True)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
-        sys.exit(1)
+        LOG.warn('Finished by Ctrl-c!')
+        sys.exit(2)
 
     signal.signal(signal.SIGINT, kill)
-    time_delta = 0
-    while(True):
-        poll = p.poll()
-        if poll is None:
-            if time_delta == 1500:
-                print ('Tempest-tests timed out at 25 min')
+
+    start_time = datetime.datetime.now()
+    while True:
+        output = p.stdout.readline()
+        LOG.info(output.strip())
+        return_code = p.poll()
+        if return_code is not None:
+            LOG.debug('RETURN CODE: {0}'.format(return_code))
+            if return_code != 0:
+                LOG.error('Tempest-tests failed !!!')
                 raise TempestTestFailedException()
-            if time_delta % 30 == 0:
-                LOG.info('Still running tempest-tests')
-            time_delta += 1
-            time.sleep(1)
-        elif poll != 0:
-            LOG.info('Tempest-tests failed, listing containers/logs.')
-            raise TempestTestFailedException()
-        else:
+            if return_code == 0:
+                LOG.info('Tempest-tests succeeded')
+            # Process has finished, read rest of the output 
+            #for output in p.stdout.readlines():
+            #    LOG.error(output.strip())
             break
-    LOG.info('Tempest-tests succeeded')
+        end_time = start_time + datetime.timedelta(minutes=1)
+        if datetime.datetime.now() >= end_time:
+            LOG.error('Tempest-tests timed out at 1 min !!!')
+            p.kill()
+            raise TempestTestFailedException()
 
 
 def handle_other(files, modules, tags, pipeline):
@@ -975,9 +980,9 @@ def main():
     except (InitJobFailedException, SmokeTestFailedException,
             TempestTestFailedException):
         if voting:
-            raise
+            exit(1)
         else:
-            LOG.info('{0} is not voting, skipping failure'.format(pipeline))
+            LOG.warn('{0} is not voting, skipping failure'.format(pipeline))
     finally:
         output_docker_ps()
         output_docker_logs()
