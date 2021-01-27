@@ -45,7 +45,7 @@ services:
     environment:
       #KEYSTONE_HOST: ${MON_KEYSTONE_IP_ADDR}
       #KEYSTONE_HOST: "192.168.188.110"
-      KEYSTONE_HOST: dev-host
+      KEYSTONE_HOST: keystone
       KEYSTONE_PASSWORD: secretadmin
       KEYSTONE_DATABASE_BACKEND: mysql
       KEYSTONE_MYSQL_HOST: mysql_keystone
