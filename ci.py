@@ -902,9 +902,9 @@ def run_tempest_tests_metrics():
             #for output in p.stdout.readlines():
             #    LOG.error(output.strip())
             break
-        end_time = start_time + datetime.timedelta(minutes=1)
+        end_time = start_time + datetime.timedelta(minutes=20)
         if datetime.datetime.now() >= end_time:
-            LOG.error('Tempest-tests timed out at 1 min !!!')
+            LOG.error('Tempest-tests timed out at 20 min !!!')
             p.kill()
             raise TempestTestFailedException()
 
