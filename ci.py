@@ -15,7 +15,6 @@
 # under the License.
 #
 
-
 import argparse
 import datetime
 import gzip
@@ -31,8 +30,6 @@ import sys
 import time
 import yaml
 
-from google.oauth2 import service_account
-from google.cloud import storage
 
 #logging.basicConfig(format = '%(asctime)s %(levelname).5s [%(name)s] [%(lineno)4d]  %(message)s [%(funcName)s] ')
 logging.basicConfig(format = '%(asctime)s %(levelname).5s %(message)s')
@@ -46,10 +43,18 @@ parser.add_argument('-nv', '--non-voting', dest='non_voting', action='store_true
                     help='Set the check as non-voting')
 parser.add_argument('-pl', '--print-logs', dest='print_logs', action='store_true',
                     help='Print containers logs')
+parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
+                    help='Increment verbosity')
 args = parser.parse_args()
+
+logging.basicConfig(format = '%(asctime)s %(levelname).5s %(message)s')
+LOG=logging.getLogger(__name__)
+verbose = args.verbose
+LOG.setLevel(logging.DEBUG) if verbose else LOG.setLevel(logging.INFO)
 LOG.debug(args)
 
-TAG_REGEX = re.compile(r'^!(\w+)(?:\s+([\w-]+))?$')
+#TAG_REGEX = re.compile(r'^!(\w+)(?:\s+([\w-]+))?$')
+TAG_REGEX = re.compile(r'^!(build|push|readme)(?:\s([\w-]+))$')
 
 METRIC_PIPELINE_MARKER = 'metrics'
 LOG_PIPELINE_MARKER = 'logs'
@@ -94,8 +99,7 @@ INIT_JOBS = {
 METRIC_PIPELINE_SERVICES = METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES.values()
 """Explicit list of services for docker compose
 to launch for metrics pipeline"""
-LOG_PIPELINE_SERVICES = (['kafka'] +
-                         LOGS_PIPELINE_MODULE_TO_COMPOSE_SERVICES.values())
+LOG_PIPELINE_SERVICES = LOGS_PIPELINE_MODULE_TO_COMPOSE_SERVICES.values()
 """Explicit list of services for docker compose
 to launch for logs pipeline"""
 
@@ -111,7 +115,7 @@ LOG_DIR = 'monasca-logs/' + \
 BUILD_LOG_DIR = LOG_DIR + '/build/'
 RUN_LOG_DIR = LOG_DIR + '/run/'
 LOG_DIRS = [LOG_DIR, BUILD_LOG_DIR, RUN_LOG_DIR]
-MAX_RAW_LOG_SIZE = 1024L  # 1KiB
+#MAX_RAW_LOG_SIZE = 1024L  # 1KiB
 
 
 class SubprocessException(Exception):
@@ -150,121 +154,12 @@ def print_logs():
                     LOG.info("#" * 100)
                     LOG.info(log_contents)
 
-def get_client():
-    LOG.info('get_client() BEGIN')
-    cred_dict_str = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', None)
-    if not cred_dict_str:
-        LOG.warn('Could not found GCP credentials in environment variables')
-        return None
-
-    cred_dict = json.loads(cred_dict_str)
-    try:
-        credentials = service_account.Credentials.from_service_account_info(cred_dict)
-        return storage.Client(credentials=credentials, project='monasca-ci-logs')
-    except Exception as e:
-        LOG.error('Unexpected error getting GCP credentials: {}'.format(e))
-        return None
-
 
 def upload_log_files(printlogs):
-    LOG.info('upload_log_files() BEGIN')
-    client = get_client()
-    if not client:
-        LOG.warn('Could not upload logs to GCP.')
-        if printlogs:
-            return print_logs()
-        else:
-            return
-    bucket = client.bucket('monasca-ci-logs')
-
-    uploaded_files = {}
-    for log_dir in LOG_DIRS:
-        uploaded_files.update(upload_files(log_dir, bucket))
-
-    return uploaded_files
-
-
-def upload_manifest(pipeline, voting, uploaded_files, dirty_modules, files, tags):
-    LOG.info('upload_manifest() BEGIN')
-    client = get_client()
-    if not client:
-        LOG.warn('Could not upload logs to GCP')
+    if printlogs:
+        return print_logs()
+    else:
         return
-    bucket = client.bucket('monasca-ci-logs')
-
-    manifest_dict = print_env(pipeline, voting, to_print=False)
-    manifest_dict['modules'] = {}
-    for module in dirty_modules:
-        manifest_dict['modules'][module] =  {'files': []}
-        for f in files:
-            if module in f:
-                if 'init' not in module and 'init' not in f or 'init' in module and 'init' in f:
-                    manifest_dict['modules'][module]['files'].append(f)
-
-        manifest_dict['modules'][module]['uploaded_log_file'] = {}
-        for f, url in uploaded_files.iteritems():
-            if module in f:
-                if 'init' not in module and 'init' not in f or 'init' in module and 'init' in f:
-                    manifest_dict['modules'][module]['uploaded_log_file'][f] =  url
-
-    manifest_dict['run_logs'] = {}
-    for f, url in uploaded_files.iteritems():
-        if 'run' in f:
-            manifest_dict['run_logs'][f] = url
-    manifest_dict['tags'] = tags
-
-    file_path = LOG_DIR + 'manifest.json'
-    upload_file(bucket, file_path, file_str=json.dumps(manifest_dict, indent=2),
-                content_type='application/json')
-
-
-def upload_files(log_dir, bucket):
-    LOG.info('upload_files() BEGIN')
-    uploaded_files = {}
-    blob = bucket.blob(log_dir)
-    for f in os.listdir(log_dir):
-        file_path = log_dir + f
-        if os.path.isfile(file_path):
-            if os.stat(file_path).st_size > MAX_RAW_LOG_SIZE:
-                with gzip.open(file_path + '.gz', 'w') as f_out, open(file_path, 'r') as f_in:
-                    shutil.copyfileobj(f_in, f_out)
-                file_path += '.gz'
-                url = upload_file(bucket, file_path, content_encoding='gzip')
-            else:
-                url = upload_file(bucket, file_path)
-            uploaded_files[file_path] = url
-    return uploaded_files
-
-
-def upload_file(bucket, file_path, file_str=None, content_type='text/plain',
-                content_encoding=None):
-    LOG.info('upload_file() BEGIN')
-    try:
-        blob = bucket.blob(file_path)
-        if content_encoding:
-            blob.content_encoding = content_encoding
-        if file_str:
-            blob.upload_from_string(file_str, content_type=content_type)
-        else:
-            blob.upload_from_filename(file_path, content_type=content_type)
-        blob.make_public()
-
-        url = blob.public_url
-        if isinstance(url, six.binary_type):
-            url = url.decode('utf-8')
-
-        LOG.info('Public url for log: {}'.format(url))
-        return url
-    except Exception as e:
-        LOG.error('Unexpected error uploading log files to {}'
-               'Skipping upload. Got: {}'.format(file_path, e))
-        if content_encoding == 'gzip':
-            f = gzip.open(file_path, 'r')
-        else:
-            f = open(file_path, 'r')
-        log_contents = f.read()
-        LOG.error(log_contents)
-        f.close()
 
 
 def set_log_dir():
@@ -284,7 +179,6 @@ def set_log_dir():
 
 
 def get_changed_files():
-    LOG.info('get_changed_files() BEGIN')
     commit_range = os.environ.get('TRAVIS_COMMIT_RANGE', None)
     if not commit_range:
         return []
@@ -294,6 +188,10 @@ def get_changed_files():
     ], stdout=subprocess.PIPE)
 
     stdout, _ = p.communicate()
+
+    if six.PY3:
+        stdout = stdout.decode('utf-8')
+
     if p.returncode != 0:
         raise SubprocessException('git returned non-zero exit code')
 
@@ -301,7 +199,6 @@ def get_changed_files():
 
 
 def get_message_tags():
-    LOG.info('get_message_tags() BEGIN')
     commit = os.environ.get('TRAVIS_COMMIT_RANGE', None)
     if not commit:
         return []
@@ -310,6 +207,10 @@ def get_message_tags():
         'git', 'log', '--pretty=%B', '-1', commit
     ], stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
+
+    if six.PY3:
+        stdout = stdout.decode('utf-8')
+
     if p.returncode != 0:
         raise SubprocessException('git returned non-zero exit code')
 
@@ -324,7 +225,7 @@ def get_message_tags():
 
 
 def get_dirty_modules(dirty_files):
-    LOG.info('get_dirty_modules() BEGIN')
+    LOG.info('dirty_files {0}'.format(dirty_files))
     dirty = set()
     for f in dirty_files:
         if os.path.sep in f:
@@ -346,7 +247,6 @@ def get_dirty_modules(dirty_files):
 
 
 def get_dirty_for_module(files, module=None):
-    LOG.info('get_dirty_for_module() BEGIN')
     ret = []
     for f in files:
         if os.path.sep in f:
@@ -362,7 +262,6 @@ def get_dirty_for_module(files, module=None):
 
 
 def run_build(modules):
-    LOG.info('run_build() BEGIN')
     log_dir = BUILD_LOG_DIR
     build_args = ['dbuild', '-sd', '--build-log-dir', log_dir, 'build', 'all', '+', ':ci-cd'] + modules
     LOG.info('build command:', build_args)
@@ -371,8 +270,7 @@ def run_build(modules):
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
@@ -382,8 +280,6 @@ def run_build(modules):
 
 
 def run_push(modules, pipeline):
-    LOG.info('run_push(modules) BEGIN')
-
     if pipeline == 'logs':
         LOG.info('images are already pushed by metrics-pipeline, skipping!')
         return
@@ -395,8 +291,6 @@ def run_push(modules, pipeline):
 
     username = os.environ.get('DOCKER_HUB_USERNAME', None)
     password = os.environ.get('DOCKER_HUB_PASSWORD', None)
-    #LOG.info('run_push(modules) username', username)
-    #LOG.info('run_push(modules) password', password)
 
     if username and password:
         LOG.info('Logging into docker registry...')
@@ -418,8 +312,7 @@ def run_push(modules, pipeline):
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
@@ -429,7 +322,6 @@ def run_push(modules, pipeline):
 
 
 def run_readme(modules):
-    LOG.info('run_readme() BEGIN')
     if os.environ.get('TRAVIS_SECURE_ENV_VARS', None) != "true":
         LOG.info('No Docker Hub permissions in this context, skipping!')
         LOG.info('Not updating READMEs: %r' % modules)
@@ -443,8 +335,7 @@ def run_readme(modules):
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
@@ -454,7 +345,6 @@ def run_readme(modules):
 
 
 def update_docker_compose(modules, pipeline):
-    LOG.info('update_docker_compose() BEGIN')
     compose_dict = load_yml(PIPELINE_TO_YAML_COMPOSE['metrics'])
     services_to_changes = METRIC_PIPELINE_MODULE_TO_COMPOSE_SERVICES.copy()
 
@@ -483,6 +373,8 @@ def update_docker_compose(modules, pipeline):
     # Update compose version
     compose_dict['version'] = '2'
 
+    LOG.debug("Displaying {0}\n\n{1}".format(CI_COMPOSE_FILE, yaml.dump(compose_dict, default_flow_style=False)))
+
     try:
         with open(CI_COMPOSE_FILE, 'w') as docker_compose:
             yaml.dump(compose_dict, docker_compose, default_flow_style=False)
@@ -493,7 +385,6 @@ def update_docker_compose(modules, pipeline):
 
 
 def load_yml(yml_path):
-    LOG.info('load_yml() BEGIN')
     try:
         with open(yml_path) as compose_file:
             compose_dict = yaml.safe_load(compose_file)
@@ -503,7 +394,6 @@ def load_yml(yml_path):
 
 
 def handle_pull_request(files, modules, tags, pipeline):
-    LOG.info('handle_pull_request() BEGIN')
     modules_to_build = modules[:]
 
     for tag, arg in tags:
@@ -549,7 +439,6 @@ def handle_pull_request(files, modules, tags, pipeline):
 
 
 def pick_modules_for_pipeline(modules, pipeline):
-    LOG.info('pick_modules_for_pipeline() BEGIN')
     if not modules:
         return []
 
@@ -584,19 +473,21 @@ def pick_modules_for_pipeline(modules, pipeline):
 
 
 def get_current_init_status(docker_id):
-    LOG.info('get_current_init_status() BEGIN')
     init_status = ['docker', 'inspect', '-f', '{{ .State.ExitCode }}:{{ .State.Status }}', docker_id]
+
     p = subprocess.Popen(init_status, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
 
     output, err = p.communicate()
+
+    if six.PY3:
+        output = output.decode('utf-8')
 
     if p.wait() != 0:
         LOG.info('getting current status failed')
@@ -604,24 +495,29 @@ def get_current_init_status(docker_id):
     status_output = output.rstrip()
 
     exit_code, status = status_output.split(":", 1)
+    LOG.debug('Status from init-container {0}, exit_code {1}, status {2}'.format(docker_id, exit_code, status))
     return exit_code == "0" and status == "exited"
 
 
 def output_docker_logs():
-    LOG.info('output_docker_logs() BEGIN')
+    LOG.info("Saving container logs at {0}".format(LOG_DIR))
     docker_names = ['docker', 'ps', '-a', '--format', '"{{.Names}}"']
 
+    LOG.debug('Executing: {0}'.format(' '.join(docker_names)))
     p = subprocess.Popen(docker_names, stdout=subprocess.PIPE)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
 
     output, err = p.communicate()
+
+    if six.PY3:
+        output = output.decode('utf-8')
+
     names = output.replace('"', '').split('\n')
 
     for name in names:
@@ -630,6 +526,8 @@ def output_docker_logs():
 
         docker_logs = ['docker', 'logs', '-t', name]
         log_name = RUN_LOG_DIR + 'docker_log_' + name + '.log'
+
+        LOG.debug('Executing: {0}'.format(' '.join(docker_logs)))
         with open(log_name, 'w') as out:
             p = subprocess.Popen(docker_logs, stdout=out,
                                  stderr=subprocess.STDOUT)
@@ -637,36 +535,42 @@ def output_docker_logs():
         if p.wait() != 0:
             LOG.error('Error running docker log for {}'.format(name))
 
+def addtab(s):
+    white = " " * 2
+    return white + white.join(s.splitlines(1))
 
 def output_docker_ps():
-    LOG.info('output_docker_ps() BEGIN')
+    LOG.info('Displaying all docker containers')
     docker_ps = ['docker', 'ps', '-a']
 
-    docker_ps_process = subprocess.Popen(docker_ps)
+    LOG.debug('Executing: {0}'.format(' '.join(docker_ps)))
+    p = subprocess.Popen(docker_ps, stdout=subprocess.PIPE)
 
     def kill(signal, frame):
-        docker_ps_process.kill()
-        print()
-        print('killed!')
+        p.kill()
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
-    if docker_ps_process.wait() != 0:
-        LOG.error('Error running docker ps')
+
+    output, err = p.communicate()
+
+    if six.PY3:
+        output = output.decode('utf-8')
+    LOG.info("\n" + addtab(output))
 
 
 def output_compose_details(pipeline):
-    LOG.info('output_compose_details() BEGIN')
-    LOG.info('Running docker-compose -f {0}'.format(CI_COMPOSE_FILE))
     if pipeline == 'metrics':
         services = METRIC_PIPELINE_SERVICES
     else:
         services = LOG_PIPELINE_SERVICES
-    LOG.info('All services that are about to start: ', services)
+    if six.PY3:
+        services = list(services)
+    LOG.info('All services that are about to start: {0}'.format(', '.join(services)))
 
 
 def get_docker_id(init_job):
-    LOG.info('get_docker_id() BEGIN')
     docker_id = ['docker-compose',
                  '-f', CI_COMPOSE_FILE,
                  'ps',
@@ -676,13 +580,15 @@ def get_docker_id(init_job):
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
 
     output, err = p.communicate()
+
+    if six.PY3:
+        output = output.decode('utf-8')
 
     if p.wait() != 0:
         LOG.error('error getting docker id')
@@ -691,13 +597,13 @@ def get_docker_id(init_job):
 
 
 def wait_for_init_jobs(pipeline):
-    LOG.info('wait_for_init_jobs() BEGIN')
+    LOG.info('Waiting 20 sec for init jobs to finish...')
     init_status_dict = {job: False for job in INIT_JOBS[pipeline]}
     docker_id_dict = {job: "" for job in INIT_JOBS[pipeline]}
 
     amount_succeeded = 0
     for attempt in range(40):
-        time.sleep(30)
+        time.sleep(20)
         amount_succeeded = 0
         for init_job, status in init_status_dict.items():
             if docker_id_dict[init_job] == "":
@@ -710,18 +616,16 @@ def wait_for_init_jobs(pipeline):
                 if updated_status:
                     amount_succeeded += 1
         if amount_succeeded == len(docker_id_dict):
-            LOG.info("All init-jobs passed!")
+            LOG.info("All init-jobs finished successfully !!!")
             break
         else:
-            LOG.info("Not all init jobs have succeeded. Attempt: " + str(attempt + 1) + " of 40")
-
+            LOG.info("Not all init jobs have finished yet, waiting another 20 sec. Try " + str(attempt + 1) + " of 40...")
     if amount_succeeded != len(docker_id_dict):
-        LOG.error("Init-jobs did not succeed, printing docker ps and logs")
+        LOG.error("Init-jobs did not succeed !!!")
         raise InitJobFailedException()
 
 
 def handle_push(files, modules, tags, pipeline):
-    LOG.info('handle_push() BEGIN')
     modules_to_push = []
     modules_to_readme = []
 
@@ -781,13 +685,13 @@ def run_docker_keystone():
                               '-f', 'docker-compose-dev.yml',
                               'up', '-d']
 
+    LOG.debug('Executing: {0}'.format(' '.join(docker_compose_dev_command)))
     with open(RUN_LOG_DIR + 'docker_compose_dev.log', 'w') as out:
         p = subprocess.Popen(docker_compose_dev_command, stdout=out)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
@@ -824,17 +728,19 @@ def run_docker_compose(pipeline):
     else:
         services = LOG_PIPELINE_SERVICES
 
+    if six.PY3:
+        services = list(services)
     docker_compose_command = ['docker-compose',
                               '-f', CI_COMPOSE_FILE,
                               'up', '-d'] + services
 
+    LOG.debug('Executing: {0}'.format(' '.join(docker_compose_command)))
     with open(RUN_LOG_DIR + 'docker_compose.log', 'w') as out:
         p = subprocess.Popen(docker_compose_command, stdout=out)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
@@ -858,19 +764,18 @@ def run_smoke_tests_metrics():
                        '-p', '0.0.0.0:8080:8080',
                        '--name', 'monasca-docker-smoke',
                        'fest/smoke-tests:pike-latest']
-    #TODO: repo has no stable/pike!
 
+    LOG.debug('Executing: {0}'.format(' '.join(smoke_tests_run)))
     p = subprocess.Popen(smoke_tests_run)
 
     def kill(signal, frame):
         p.kill()
-        print()
-        print('killed!')
+        LOG.warn('Finished by Ctrl-c!')
         sys.exit(1)
 
     signal.signal(signal.SIGINT, kill)
     if p.wait() != 0:
-        LOG.error('Smoke-tests failed, listing containers/logs.')
+        LOG.error('Smoke-tests failed')
         raise SmokeTestFailedException()
 
 
@@ -885,6 +790,7 @@ def run_tempest_tests_metrics():
                          '--name', 'monasca-docker-tempest',
                          'chaconpiza/tempest-tests:test']
 
+    LOG.debug('Executing: {0}'.format(' '.join(tempest_tests_run)))
     p = subprocess.Popen(tempest_tests_run, stdout=subprocess.PIPE, universal_newlines=True)
 
     def kill(signal, frame):
@@ -922,7 +828,7 @@ def handle_other(files, modules, tags, pipeline):
         os.environ.get('TRAVIS_EVENT_TYPE')))
 
 
-def print_env(pipeline, voting, to_print=True):
+def print_env(pipeline, voting, printlogs, verbose, to_print=True):
     environ_vars = {'environment_details': {
         'TRAVIS_COMMIT': os.environ.get('TRAVIS_COMMIT'),
         'TRAVIS_COMMIT_RANGE': os.environ.get('TRAVIS_COMMIT_RANGE'),
@@ -938,10 +844,12 @@ def print_env(pipeline, voting, to_print=True):
         'TRAVIS_BUILD_ID': os.environ.get('TRAVIS_BUILD_ID'),
         'TRAVIS_JOB_NUMBER': os.environ.get('TRAVIS_JOB_NUMBER'),
         'CI_PIPELINE': pipeline,
-        'CI_VOTING': voting }}
+        'CI_VOTING': voting,
+        'CI_PRINT_LOGS': printlogs,
+        'CI_VERBOSE': verbose}}
 
     if to_print:
-        LOG.info(json.dumps(environ_vars, indent=2))
+        LOG.debug(json.dumps(environ_vars, indent=2))
     return environ_vars
 
 
@@ -957,7 +865,7 @@ def main():
         LOG.warn('Unkown pipeline: {0}'.format(pipeline))
         exit(2)
 
-    print_env(pipeline, voting)
+    print_env(pipeline, voting, printlogs, verbose)
     set_log_dir()
 
     files = get_changed_files()
@@ -993,8 +901,7 @@ def main():
     finally:
         output_docker_ps()
         output_docker_logs()
-        uploaded_files = upload_log_files(printlogs)
-#        upload_manifest(pipeline, voting, uploaded_files, modules, files, tags)
+        upload_log_files(printlogs)
 
 
 if __name__ == '__main__':

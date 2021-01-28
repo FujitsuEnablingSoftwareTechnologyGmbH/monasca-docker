@@ -49,10 +49,10 @@ before_install:
 jobs:
   include:
     - stage: metrics-pipeline
-      script: python ci.py --pipeline metrics --print-logs
+      script: python ci.py --pipeline metrics --print-logs --verbose
  
     - stage: logs-pipeline
-      script: python ci.py --pipeline logs --print-logs --non-voting
+      script: python ci.py --pipeline logs    --print-logs --verbose --non-voting
 
     - stage: lint-shellcheck
       script: bash -c 'shopt -s globstar; shellcheck **/*.sh'
