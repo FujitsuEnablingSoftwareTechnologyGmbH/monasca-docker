@@ -44,6 +44,8 @@ parser.add_argument('-p', '--pipeline', dest='pipeline', default=None, required=
                     help='Select the pipeline [metrics|logs]')
 parser.add_argument('-nv', '--non-voting', dest='non_voting', action='store_true',
                     help='Set the check as non-voting')
+parser.add_argument('-pl', '--print-logs', dest='print_logs', action='store_true',
+                    help='Print containers logs')
 args = parser.parse_args()
 LOG.debug(args)
 
@@ -138,13 +140,15 @@ class SmokeTestFailedException(Exception):
 
 def print_logs():
     for log_dir in LOG_DIRS:
-        for f in os.listdir(log_dir):
-            file_path = log_dir + f
+        for file_name in os.listdir(log_dir):
+            file_path = log_dir + file_name
             if os.path.isfile(file_path):
                 with open(file_path, 'r') as f:
                     log_contents = f.read()
+                    LOG.info("#" * 100)
+                    LOG.info("###### Container Logs from {0}".format(file_name))
+                    LOG.info("#" * 100)
                     LOG.info(log_contents)
-
 
 def get_client():
     LOG.info('get_client() BEGIN')
@@ -162,12 +166,15 @@ def get_client():
         return None
 
 
-def upload_log_files():
+def upload_log_files(printlogs):
     LOG.info('upload_log_files() BEGIN')
     client = get_client()
     if not client:
-        LOG.warn('Could not upload logs to GCP. Then printing them on screen.')
-        return print_logs()
+        LOG.warn('Could not upload logs to GCP.')
+        if printlogs:
+            return print_logs()
+        else:
+            return
     bucket = client.bucket('monasca-ci-logs')
 
     uploaded_files = {}
@@ -519,6 +526,7 @@ def handle_pull_request(files, modules, tags, pipeline):
         LOG.info('No modules to build.')
 
     update_docker_compose(pipeline_modules, pipeline)
+    run_docker_keystone()
     run_docker_compose(pipeline)
     wait_for_init_jobs(pipeline)
     LOG.info('Waiting for containers to be ready 1 min...')
@@ -940,6 +948,7 @@ def print_env(pipeline, voting, to_print=True):
 def main():
     pipeline = args.pipeline
     voting = not args.non_voting
+    printlogs = args.print_logs
 
 #    if os.environ.get('TRAVIS_BRANCH', None) != 'master':
 #        LOG.warn('Not master branch, skipping tests.')
@@ -965,8 +974,6 @@ def main():
     else:
         LOG.info('No tags detected.')
 
-    run_docker_keystone()
-
     func = {
         'pull_request': handle_pull_request,
         'push': handle_push
@@ -986,7 +993,7 @@ def main():
     finally:
         output_docker_ps()
         output_docker_logs()
-        uploaded_files = upload_log_files()
+        uploaded_files = upload_log_files(printlogs)
 #        upload_manifest(pipeline, voting, uploaded_files, modules, files, tags)
 
 
